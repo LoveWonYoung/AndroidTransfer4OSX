@@ -47,6 +47,16 @@ func TestParseADBPushSpeed(t *testing.T) {
 	}
 }
 
+func TestParseADBPushSpeedFromPullSummary(t *testing.T) {
+	got, ok := parseADBPushSpeed("/sdcard/DCIM/photo.jpg: 1 file pulled, 0 skipped. 8.5 MB/s (4096 bytes in 0.250s)")
+	if !ok {
+		t.Fatal("parseADBPushSpeed() did not match pull summary")
+	}
+	if got.RawSpeed != "8.5 MB/s" || got.Bytes != 4096 || got.Duration != 250*time.Millisecond {
+		t.Fatalf("parseADBPushSpeed() = %#v", got)
+	}
+}
+
 func TestParseADBPushProgressLine(t *testing.T) {
 	got, ok := parseADBPushProgressLine("[ 75%] 4.2 MB/s")
 	if !ok {

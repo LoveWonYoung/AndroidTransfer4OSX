@@ -53,6 +53,15 @@ func (ui *transferUI) updatePushEnabled() {
 		} else {
 			ui.pushBtn.Disable()
 		}
+
+		hasPullRemote := strings.TrimSpace(ui.pullRemoteEntry.Text) != ""
+		hasPullLocal := strings.TrimSpace(ui.pullLocalEntry.Text) != ""
+		if !busy && selectedSerial != "" && hasPullRemote && hasPullLocal {
+			ui.pullBtn.Enable()
+		} else {
+			ui.pullBtn.Disable()
+		}
+
 		if !busy && selectedSerial != "" {
 			ui.scanStorageBtn.Enable()
 			return
@@ -78,10 +87,12 @@ func (ui *transferUI) beginTask(busyMsg string) bool {
 		ui.progress.Show()
 		ui.progress.Start()
 		ui.pushBtn.Disable()
+		ui.pullBtn.Disable()
 		ui.scanStorageBtn.Disable()
 		ui.addPathBtn.Disable()
 		ui.removeItemBtn.Disable()
 		ui.clearQueueBtn.Disable()
+		ui.retryFailedBtn.Disable()
 		ui.cancelBtn.Disable()
 	})
 	return true

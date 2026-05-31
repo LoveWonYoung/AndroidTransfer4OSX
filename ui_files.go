@@ -86,3 +86,18 @@ func (ui *transferUI) pickLocalDir() {
 	fd.Resize(fyne.NewSize(fileDialogWidth, fileDialogHeight))
 	fd.Show()
 }
+
+func (ui *transferUI) pickPullLocalDir() {
+	fd := dialog.NewFolderOpen(func(uri fyne.ListableURI, err error) {
+		if err != nil {
+			dialog.ShowError(err, ui.window)
+			return
+		}
+		if uri == nil {
+			return
+		}
+		ui.pullLocalEntry.SetText(uri.Path())
+	}, ui.window)
+	fd.Resize(fyne.NewSize(fileDialogWidth, fileDialogHeight))
+	fd.Show()
+}

@@ -26,7 +26,7 @@ func newTransferUI(w fyne.Window) *transferUI {
 func (ui *transferUI) initWidgets() {
 	ui.adbPathEntry = widget.NewEntry()
 	ui.adbPathEntry.SetPlaceHolder("ADB 可执行文件或 platform-tools 目录")
-	ui.adbPathEntry.SetText(defaultADBInput)
+	ui.adbPathEntry.SetText(ui.savedPreferenceString(prefKeyADBPath, defaultADBInput()))
 
 	ui.deviceSelect = widget.NewSelect(nil, nil)
 	ui.deviceSelect.PlaceHolder = "点击刷新设备列表"
@@ -38,8 +38,16 @@ func (ui *transferUI) initWidgets() {
 	ui.localPathEntry.SetPlaceHolder("选择或输入要传输的文件/目录路径")
 
 	ui.remoteDirEntry = widget.NewEntry()
-	ui.remoteDirEntry.SetPlaceHolder("/sdcard/Download")
-	ui.remoteDirEntry.SetText("/sdcard/Download")
+	ui.remoteDirEntry.SetPlaceHolder(defaultRemoteDir)
+	ui.remoteDirEntry.SetText(ui.savedPreferenceString(prefKeyRemoteDir, defaultRemoteDir))
+
+	ui.pullRemoteEntry = widget.NewEntry()
+	ui.pullRemoteEntry.SetPlaceHolder("/sdcard/Download/example.jpg 或 /sdcard/DCIM/Camera")
+	ui.pullRemoteEntry.SetText(ui.savedPreferenceString(prefKeyPullRemotePath, ""))
+
+	ui.pullLocalEntry = widget.NewEntry()
+	ui.pullLocalEntry.SetPlaceHolder(defaultPullLocalDir())
+	ui.pullLocalEntry.SetText(ui.savedPreferenceString(prefKeyPullLocalDir, defaultPullLocalDir()))
 
 	ui.statusLabel = widget.NewLabel("就绪")
 
@@ -97,6 +105,9 @@ func (ui *transferUI) initWidgets() {
 	ui.pushBtn = widget.NewButton("开始传输", ui.StartPush)
 	ui.pushBtn.Disable()
 
+	ui.pullBtn = widget.NewButton("开始下载", ui.StartPull)
+	ui.pullBtn.Disable()
+
 	ui.refreshBtn = widget.NewButton("刷新设备", ui.RefreshDevices)
 	ui.scanStorageBtn = widget.NewButton("识别存储", func() {
 		ui.refreshRemoteDirPresets(true)
@@ -108,6 +119,8 @@ func (ui *transferUI) initWidgets() {
 	ui.removeItemBtn.Disable()
 	ui.clearQueueBtn = widget.NewButton("清空队列", ui.ClearQueue)
 	ui.clearQueueBtn.Disable()
+	ui.retryFailedBtn = widget.NewButton("重试失败项", ui.RetryFailedItems)
+	ui.retryFailedBtn.Disable()
 	ui.cancelBtn = widget.NewButton("取消任务", ui.CancelCurrentTask)
 	ui.cancelBtn.Disable()
 
@@ -115,6 +128,9 @@ func (ui *transferUI) initWidgets() {
 }
 
 func (ui *transferUI) bindEvents() {
+	ui.adbPathEntry.OnChanged = func(value string) {
+		ui.savePreferenceString(prefKeyADBPath, value)
+	}
 	ui.deviceSelect.OnChanged = func(string) {
 		ui.updatePushEnabled()
 		ui.refreshRemoteDirPresets(false)
@@ -130,23 +146,40 @@ func (ui *transferUI) bindEvents() {
 		ui.updateQueueButtons()
 	}
 	ui.remoteDirEntry.OnChanged = func(string) {
+		ui.savePreferenceString(prefKeyRemoteDir, ui.remoteDirEntry.Text)
+		ui.updatePushEnabled()
+	}
+	ui.pullRemoteEntry.OnChanged = func(value string) {
+		ui.savePreferenceString(prefKeyPullRemotePath, value)
+		ui.updatePushEnabled()
+	}
+	ui.pullLocalEntry.OnChanged = func(value string) {
+		ui.savePreferenceString(prefKeyPullLocalDir, value)
 		ui.updatePushEnabled()
 	}
 	ui.window.SetOnDropped(func(_ fyne.Position, items []fyne.URI) {
 		ui.handleWindowDrop(items)
 	})
+	ui.window.SetOnClosed(ui.saveWindowState)
 }
 
 func (ui *transferUI) Content() fyne.CanvasObject {
 	chooseFileBtn := widget.NewButton("添加文件", ui.pickLocalFile)
 	chooseDirBtn := widget.NewButton("添加目录", ui.pickLocalDir)
+	choosePullDirBtn := widget.NewButton("选择保存目录", ui.pickPullLocalDir)
 
-	form := widget.NewForm(
+	commonForm := widget.NewForm(
 		widget.NewFormItem("ADB 路径", ui.adbPathEntry),
 		widget.NewFormItem("设备", container.NewBorder(nil, nil, nil, ui.refreshBtn, ui.deviceSelect)),
-		widget.NewFormItem("常用目录", container.NewBorder(nil, nil, nil, ui.scanStorageBtn, ui.dirPresetSelect)),
+		widget.NewFormItem("常用安卓目录", container.NewBorder(nil, nil, nil, ui.scanStorageBtn, ui.dirPresetSelect)),
+	)
+	uploadForm := widget.NewForm(
 		widget.NewFormItem("本地路径", ui.localPathEntry),
 		widget.NewFormItem("安卓目录", ui.remoteDirEntry),
+	)
+	downloadForm := widget.NewForm(
+		widget.NewFormItem("安卓路径", ui.pullRemoteEntry),
+		widget.NewFormItem("保存到电脑", container.NewBorder(nil, nil, nil, choosePullDirBtn, ui.pullLocalEntry)),
 	)
 
 	queuePanel := container.NewBorder(
@@ -166,17 +199,23 @@ func (ui *transferUI) Content() fyne.CanvasObject {
 	leftPanel := container.NewVScroll(container.NewVBox(
 		widget.NewLabel("控制面板"),
 		container.NewVBox(
-			widget.NewLabel("使用 ADB 将文件或目录传输到 Android（USB 调试需开启）"),
-			form,
+			widget.NewLabel("使用 ADB 在电脑和 Android 之间传输文件或目录（USB 调试需开启）"),
+			commonForm,
 			widget.NewSeparator(),
-			widget.NewLabel("队列操作"),
+			widget.NewLabel("上传到 Android"),
+			uploadForm,
 			container.NewGridWithColumns(2, chooseFileBtn, chooseDirBtn),
 			ui.addPathBtn,
 			ui.removeItemBtn,
 			ui.clearQueueBtn,
+			ui.retryFailedBtn,
+			ui.pushBtn,
+			widget.NewSeparator(),
+			widget.NewLabel("下载到电脑"),
+			downloadForm,
+			ui.pullBtn,
 			widget.NewSeparator(),
 			widget.NewLabel("任务操作"),
-			ui.pushBtn,
 			ui.cancelBtn,
 			ui.clearLogBtn,
 			container.NewHBox(widget.NewLabel("状态:"), ui.statusLabel),

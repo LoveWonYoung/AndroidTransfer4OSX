@@ -12,9 +12,8 @@ import (
 	"sync"
 )
 
-const defaultADBInput = "/Users/lianmin/platform-tools"
-
 func resolveADBPath(input string) (string, error) {
+	input = strings.TrimSpace(input)
 	if input == "" {
 		return "", errors.New("ADB 路径为空")
 	}
@@ -22,12 +21,17 @@ func resolveADBPath(input string) (string, error) {
 	clean := filepath.Clean(input)
 	fi, err := os.Stat(clean)
 	if err != nil {
+		if !strings.ContainsAny(input, `/\`) {
+			if resolved, lookErr := exec.LookPath(input); lookErr == nil {
+				return resolved, nil
+			}
+		}
 		return "", err
 	}
 
 	adbExec := clean
 	if fi.IsDir() {
-		adbExec = filepath.Join(clean, "adb")
+		adbExec = filepath.Join(clean, adbExecutableName())
 	}
 
 	info, err := os.Stat(adbExec)
@@ -55,6 +59,10 @@ func adbEnsureDir(ctx context.Context, adbExec, serial, remoteDir string) (strin
 
 func adbPush(ctx context.Context, adbExec, serial, localPath, remoteDir string) (string, error) {
 	return runADB(ctx, adbExec, serial, "push", localPath, remoteDir)
+}
+
+func adbPull(ctx context.Context, adbExec, serial, remotePath, localDir string) (string, error) {
+	return runADB(ctx, adbExec, serial, "pull", remotePath, localDir)
 }
 
 func adbPushWithProgress(ctx context.Context, adbExec, serial, localPath, remoteDir string, onProgress func(adbPushProgressInfo)) (string, error) {

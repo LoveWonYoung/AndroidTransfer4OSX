@@ -18,6 +18,7 @@ func (ui *transferUI) RefreshDevices() {
 	fyne.Do(func() {
 		ui.deviceSelect.Disable()
 		ui.pushBtn.Disable()
+		ui.pullBtn.Disable()
 	})
 	ui.setStatus("正在刷新设备列表...")
 
@@ -68,9 +69,11 @@ func (ui *transferUI) RefreshDevices() {
 
 		nextMap := make(map[string]string)
 		labels := make([]string, 0, len(devices))
+		unusable := make([]deviceInfo, 0)
 		for _, d := range devices {
 			if d.Status != "device" {
-				ui.appendLog(fmt.Sprintf("设备 %s 当前状态: %s", d.Serial, d.Status))
+				unusable = append(unusable, d)
+				ui.appendLog(fmt.Sprintf("设备 %s 当前状态: %s（%s）", d.Serial, d.Status, deviceStatusHint(d.Status)))
 				continue
 			}
 
@@ -94,7 +97,11 @@ func (ui *transferUI) RefreshDevices() {
 			}
 			ui.deviceSelect.ClearSelected()
 			ui.setDirPresets(nil)
-			ui.setStatus("未发现可用设备（请检查 USB 调试授权）")
+			if len(unusable) > 0 {
+				ui.setStatus(fmt.Sprintf("未发现可用设备：%s", deviceStatusHint(unusable[0].Status)))
+				return
+			}
+			ui.setStatus("未发现设备：请检查 USB 线、驱动和 USB 调试开关")
 		})
 	}()
 }
@@ -174,6 +181,7 @@ func (ui *transferUI) refreshRemoteDirPresets(manual bool) {
 func (ui *transferUI) setDirPresets(options []string) {
 	fyne.Do(func() {
 		currentRemote := strings.TrimSpace(ui.remoteDirEntry.Text)
+		options = mergeDirOptions(options, ui.recentRemoteDirs())
 		ui.dirPresetSelect.Options = options
 		ui.dirPresetSelect.Refresh()
 

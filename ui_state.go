@@ -17,6 +17,7 @@ const (
 	scanStorageTimeout    = 5 * time.Second
 	adbEnsureDirTimeout   = 8 * time.Second
 	adbPushTimeout        = 30 * time.Minute
+	adbPullTimeout        = 30 * time.Minute
 	maxLogLines           = 1000
 	maxQueueItems         = 500
 )
@@ -48,17 +49,21 @@ type transferUI struct {
 	dirPresetSelect *widget.Select
 	localPathEntry  *widget.Entry
 	remoteDirEntry  *widget.Entry
+	pullRemoteEntry *widget.Entry
+	pullLocalEntry  *widget.Entry
 	statusLabel     *widget.Label
 	logBox          *widget.Entry
 	queueList       *widget.List
 	progress        *widget.ProgressBarInfinite
 
 	pushBtn        *widget.Button
+	pullBtn        *widget.Button
 	refreshBtn     *widget.Button
 	scanStorageBtn *widget.Button
 	addPathBtn     *widget.Button
 	removeItemBtn  *widget.Button
 	clearQueueBtn  *widget.Button
+	retryFailedBtn *widget.Button
 	cancelBtn      *widget.Button
 	clearLogBtn    *widget.Button
 }

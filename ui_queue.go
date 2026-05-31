@@ -244,6 +244,7 @@ func (ui *transferUI) updateQueueButtons() {
 		busy := ui.state.busy
 		queueCount := len(ui.state.queue)
 		selected := ui.state.queueSelected
+		retryableCount := countRetryableQueueItems(ui.state.queue)
 		ui.state.mu.Unlock()
 
 		hasPathInput := strings.TrimSpace(ui.localPathEntry.Text) != ""
@@ -257,10 +258,34 @@ func (ui *transferUI) updateQueueButtons() {
 		} else {
 			ui.clearQueueBtn.Disable()
 		}
+		if !busy && retryableCount > 0 {
+			ui.retryFailedBtn.Enable()
+		} else {
+			ui.retryFailedBtn.Disable()
+		}
 		if !busy && selected >= 0 && selected < queueCount {
 			ui.removeItemBtn.Enable()
 			return
 		}
 		ui.removeItemBtn.Disable()
 	})
+}
+
+func countRetryableQueueItems(items []queueItem) int {
+	count := 0
+	for _, item := range items {
+		if isRetryableQueueStatus(item.Status) {
+			count++
+		}
+	}
+	return count
+}
+
+func isRetryableQueueStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "失败", "超时", "已取消", "待重试":
+		return true
+	default:
+		return false
+	}
 }

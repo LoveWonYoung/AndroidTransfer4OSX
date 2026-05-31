@@ -13,7 +13,20 @@ import (
 	"fyne.io/fyne/v2"
 )
 
+type transferQueueEntry struct {
+	QueueIndex int
+	Item       queueItem
+}
+
 func (ui *transferUI) StartPush() {
+	ui.startPush(false)
+}
+
+func (ui *transferUI) RetryFailedItems() {
+	ui.startPush(true)
+}
+
+func (ui *transferUI) startPush(retryFailedOnly bool) {
 	if !ui.beginTask("有任务正在执行，请稍候") {
 		return
 	}
@@ -24,7 +37,7 @@ func (ui *transferUI) StartPush() {
 
 	ui.state.mu.Lock()
 	serial := ui.state.deviceMap[deviceLabel]
-	queueSnapshot := append([]queueItem(nil), ui.state.queue...)
+	queueSnapshot := buildTransferQueueSnapshot(ui.state.queue, retryFailedOnly)
 	ui.state.mu.Unlock()
 
 	fyne.Do(func() {
@@ -49,6 +62,11 @@ func (ui *transferUI) StartPush() {
 			return
 		}
 		if len(queueSnapshot) == 0 {
+			if retryFailedOnly {
+				ui.appendLog("没有可重试的失败、超时或已取消队列项")
+				ui.setStatus("没有可重试项")
+				return
+			}
 			ui.appendLog("待传输队列为空")
 			ui.setStatus("请先添加文件或目录到队列")
 			return
@@ -63,8 +81,14 @@ func (ui *transferUI) StartPush() {
 
 		ui.appendLog(fmt.Sprintf("目标设备: %s", serial))
 		ui.appendLog(fmt.Sprintf("安卓目录: %s", remoteDir))
-		ui.appendLog(fmt.Sprintf("队列条目: %d", len(queueSnapshot)))
-		ui.resetQueueStatuses("待传输")
+		ui.saveRecentRemoteDir(remoteDir)
+		if retryFailedOnly {
+			ui.appendLog(fmt.Sprintf("重试队列条目: %d", len(queueSnapshot)))
+			ui.updateTransferEntriesStatus(queueSnapshot, "待重试")
+		} else {
+			ui.appendLog(fmt.Sprintf("队列条目: %d", len(queueSnapshot)))
+			ui.resetQueueStatuses("待传输")
+		}
 
 		taskCtx, taskCancel := context.WithCancel(context.Background())
 		defer taskCancel()
@@ -96,13 +120,16 @@ func (ui *transferUI) StartPush() {
 		failCount := 0
 		var totalTransferredBytes int64
 		var totalTransferDuration time.Duration
-		for i, item := range queueSnapshot {
-			ui.updateQueueItemStatus(i, "校验中")
+		totalEntries := len(queueSnapshot)
+		for i, entry := range queueSnapshot {
+			queueIndex := entry.QueueIndex
+			item := entry.Item
+			ui.updateQueueItemStatus(queueIndex, "校验中")
 			info, err := os.Stat(item.LocalPath)
 			if err != nil {
 				failCount++
-				ui.updateQueueItemStatus(i, "失败")
-				ui.appendLog(fmt.Sprintf("队列项 %d 跳过，本地路径不可用: %s (%v)", i+1, item.LocalPath, err))
+				ui.updateQueueItemStatus(queueIndex, "失败")
+				ui.appendLog(fmt.Sprintf("队列项 %d 跳过，本地路径不可用: %s (%v)", queueIndex+1, item.LocalPath, err))
 				continue
 			}
 
@@ -112,16 +139,16 @@ func (ui *transferUI) StartPush() {
 			}
 			itemBytes, sizeErr := estimateTransferBytes(item.LocalPath, info)
 			if sizeErr != nil {
-				ui.appendLog(fmt.Sprintf("队列项 %d 无法统计大小，将仅显示耗时: %v", i+1, sizeErr))
+				ui.appendLog(fmt.Sprintf("队列项 %d 无法统计大小，将仅显示耗时: %v", queueIndex+1, sizeErr))
 			}
 			sizeText := "未知大小"
 			if sizeErr == nil {
 				sizeText = formatDataSize(itemBytes)
 			}
 
-			ui.updateQueueItemStatus(i, "传输中")
-			ui.setStatus(fmt.Sprintf("正在传输 (%d/%d): %s (%s)", i+1, len(queueSnapshot), filepath.Base(item.LocalPath), sizeText))
-			ui.appendLog(fmt.Sprintf("开始传输 [%d/%d] %s: %s (大小: %s)", i+1, len(queueSnapshot), itemKind, item.LocalPath, sizeText))
+			ui.updateQueueItemStatus(queueIndex, "传输中")
+			ui.setStatus(fmt.Sprintf("正在传输 (%d/%d): %s (%s)", i+1, totalEntries, filepath.Base(item.LocalPath), sizeText))
+			ui.appendLog(fmt.Sprintf("开始传输 [%d/%d] 队列项 %d %s: %s (大小: %s)", i+1, totalEntries, queueIndex+1, itemKind, item.LocalPath, sizeText))
 			ui.appendLog("$ " + adbExec + " -s " + serial + " push -p " + item.LocalPath + " " + remoteDir)
 
 			startAt := time.Now()
@@ -144,7 +171,7 @@ func (ui *transferUI) StartPush() {
 						speed := progressSpeed
 						progressStateMu.Unlock()
 
-						status := fmt.Sprintf("正在传输 (%d/%d): %s, 已用时 %s", itemIndex+1, len(queueSnapshot), itemName, formatDuration(time.Since(startAt)))
+						status := fmt.Sprintf("正在传输 (%d/%d): %s, 已用时 %s", itemIndex+1, totalEntries, itemName, formatDuration(time.Since(startAt)))
 						if pct >= 0 {
 							status += fmt.Sprintf(", 进度 %d%%", pct)
 						}
@@ -179,7 +206,7 @@ func (ui *transferUI) StartPush() {
 				}
 				progressStateMu.Unlock()
 
-				status := fmt.Sprintf("正在传输 (%d/%d): %s", i+1, len(queueSnapshot), filepath.Base(item.LocalPath))
+				status := fmt.Sprintf("正在传输 (%d/%d): %s", i+1, totalEntries, filepath.Base(item.LocalPath))
 				if pct >= 0 {
 					status += fmt.Sprintf(", 进度 %d%%", pct)
 				}
@@ -188,8 +215,8 @@ func (ui *transferUI) StartPush() {
 				}
 				ui.setStatus(status)
 				if shouldRefreshQueueStatus && pct >= 0 {
-					ui.updateQueueItemStatus(i, fmt.Sprintf("传输中 %d%%", pct))
-					ui.appendLog(fmt.Sprintf("队列项 %d 进度: %d%%", i+1, pct))
+					ui.updateQueueItemStatus(queueIndex, fmt.Sprintf("传输中 %d%%", pct))
+					ui.appendLog(fmt.Sprintf("队列项 %d 进度: %d%%", queueIndex+1, pct))
 				}
 			})
 			elapsed := time.Since(startAt)
@@ -200,20 +227,20 @@ func (ui *transferUI) StartPush() {
 			}
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
-					ui.updateQueueItemStatus(i, "已取消")
+					ui.updateQueueItemStatus(queueIndex, "已取消")
 					ui.appendLog("已取消传输")
 					ui.setStatus("已取消传输")
 					return
 				}
 				if errors.Is(err, context.DeadlineExceeded) {
 					failCount++
-					ui.updateQueueItemStatus(i, "超时")
-					ui.appendLog(fmt.Sprintf("队列项 %d 传输超时: %s", i+1, item.LocalPath))
+					ui.updateQueueItemStatus(queueIndex, "超时")
+					ui.appendLog(fmt.Sprintf("队列项 %d 传输超时: %s", queueIndex+1, item.LocalPath))
 					continue
 				}
 				failCount++
-				ui.updateQueueItemStatus(i, "失败")
-				ui.appendLog(fmt.Sprintf("队列项 %d 传输失败: %v", i+1, err))
+				ui.updateQueueItemStatus(queueIndex, "失败")
+				ui.appendLog(fmt.Sprintf("队列项 %d 传输失败: %v", queueIndex+1, err))
 				continue
 			}
 
@@ -237,9 +264,9 @@ func (ui *transferUI) StartPush() {
 				statusText = "成功 " + speedText
 			}
 
-			ui.updateQueueItemStatus(i, statusText)
-			ui.appendLog(fmt.Sprintf("队列项 %d 传输完成: 速度 %s, 数据量 %s, 用时 %s", i+1, speedText, dataText, durationText))
-			ui.setStatus(fmt.Sprintf("已完成 (%d/%d): %s, 速度 %s", i+1, len(queueSnapshot), filepath.Base(item.LocalPath), speedText))
+			ui.updateQueueItemStatus(queueIndex, statusText)
+			ui.appendLog(fmt.Sprintf("队列项 %d 传输完成: 速度 %s, 数据量 %s, 用时 %s", queueIndex+1, speedText, dataText, durationText))
+			ui.setStatus(fmt.Sprintf("已完成 (%d/%d): %s, 速度 %s", i+1, totalEntries, filepath.Base(item.LocalPath), speedText))
 		}
 
 		finalStatus := fmt.Sprintf("传输完成：成功 %d，失败 %d", successCount, failCount)
@@ -253,4 +280,34 @@ func (ui *transferUI) StartPush() {
 		}
 		ui.setStatus(finalStatus)
 	}()
+}
+
+func buildTransferQueueSnapshot(queue []queueItem, retryFailedOnly bool) []transferQueueEntry {
+	entries := make([]transferQueueEntry, 0, len(queue))
+	for i, item := range queue {
+		if retryFailedOnly && !isRetryableQueueStatus(item.Status) {
+			continue
+		}
+		entries = append(entries, transferQueueEntry{
+			QueueIndex: i,
+			Item:       item,
+		})
+	}
+	return entries
+}
+
+func (ui *transferUI) updateTransferEntriesStatus(entries []transferQueueEntry, status string) {
+	ui.state.mu.Lock()
+	for _, entry := range entries {
+		if entry.QueueIndex < 0 || entry.QueueIndex >= len(ui.state.queue) {
+			continue
+		}
+		ui.state.queue[entry.QueueIndex].Status = status
+	}
+	ui.resetQueueHeightsLocked()
+	ui.state.mu.Unlock()
+
+	fyne.Do(func() {
+		ui.queueList.Refresh()
+	})
 }
