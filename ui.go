@@ -587,12 +587,78 @@ func (ui *transferUI) StartPush() {
 			ui.updateQueueItemStatus(i, "传输中")
 			ui.setStatus(fmt.Sprintf("正在传输 (%d/%d): %s (%s)", i+1, len(queueSnapshot), filepath.Base(item.LocalPath), sizeText))
 			ui.appendLog(fmt.Sprintf("开始传输 [%d/%d] %s: %s (大小: %s)", i+1, len(queueSnapshot), itemKind, item.LocalPath, sizeText))
-			ui.appendLog("$ " + adbExec + " -s " + serial + " push " + item.LocalPath + " " + remoteDir)
+			ui.appendLog("$ " + adbExec + " -s " + serial + " push -p " + item.LocalPath + " " + remoteDir)
+
+			startAt := time.Now()
+			progressDone := make(chan struct{})
+			progressStateMu := sync.Mutex{}
+			progressPercent := -1
+			progressSpeed := ""
+			progressStepLogged := -1
+
+			go func(itemName string, itemIndex int) {
+				ticker := time.NewTicker(1 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-progressDone:
+						return
+					case <-ticker.C:
+						progressStateMu.Lock()
+						pct := progressPercent
+						speed := progressSpeed
+						progressStateMu.Unlock()
+
+						status := fmt.Sprintf("正在传输 (%d/%d): %s, 已用时 %s", itemIndex+1, len(queueSnapshot), itemName, formatDuration(time.Since(startAt)))
+						if pct >= 0 {
+							status += fmt.Sprintf(", 进度 %d%%", pct)
+						}
+						if speed != "" {
+							status += fmt.Sprintf(", 速度 %s", speed)
+						}
+						ui.setStatus(status)
+					}
+				}
+			}(filepath.Base(item.LocalPath), i)
 
 			pushCtx, pushCancel := context.WithTimeout(taskCtx, adbPushTimeout)
-			startAt := time.Now()
-			out, err := adbPush(pushCtx, adbExec, serial, item.LocalPath, remoteDir)
+			out, err := adbPushWithProgress(pushCtx, adbExec, serial, item.LocalPath, remoteDir, func(progress adbPushProgressInfo) {
+				progressStateMu.Lock()
+				if progress.Percent >= 0 {
+					progressPercent = progress.Percent
+				}
+				if progress.Speed != "" {
+					progressSpeed = progress.Speed
+				}
+				pct := progressPercent
+				speed := progressSpeed
+
+				step := -1
+				shouldRefreshQueueStatus := false
+				if pct >= 0 {
+					step = pct / 10
+					if step > progressStepLogged {
+						progressStepLogged = step
+						shouldRefreshQueueStatus = true
+					}
+				}
+				progressStateMu.Unlock()
+
+				status := fmt.Sprintf("正在传输 (%d/%d): %s", i+1, len(queueSnapshot), filepath.Base(item.LocalPath))
+				if pct >= 0 {
+					status += fmt.Sprintf(", 进度 %d%%", pct)
+				}
+				if speed != "" {
+					status += fmt.Sprintf(", 速度 %s", speed)
+				}
+				ui.setStatus(status)
+				if shouldRefreshQueueStatus && pct >= 0 {
+					ui.updateQueueItemStatus(i, fmt.Sprintf("传输中 %d%%", pct))
+					ui.appendLog(fmt.Sprintf("队列项 %d 进度: %d%%", i+1, pct))
+				}
+			})
 			elapsed := time.Since(startAt)
+			close(progressDone)
 			pushCancel()
 			if strings.TrimSpace(out) != "" {
 				ui.appendLog(out)
