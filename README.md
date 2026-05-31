@@ -95,8 +95,17 @@ go test ./...
 ## 项目结构
 
 - `main.go`: 应用入口
-- `ui.go`: 界面与交互逻辑
-- `adb.go`: ADB 命令执行与结果解析
+- `ui.go`: 界面控件初始化与整体布局
+- `ui_state.go`: UI 状态、常量和控件结构体
+- `ui_devices.go`: 设备刷新与存储目录识别
+- `ui_transfer.go`: 队列传输任务与进度更新
+- `ui_queue.go`: 待传输队列管理与队列列表展示
+- `ui_files.go`: 文件/目录选择与拖拽处理
+- `ui_status.go`: 状态栏、日志和任务取消控制
+- `format.go`: 数据量、速度、耗时和传输大小统计
+- `adb.go`: ADB 命令路径解析、执行与高层操作
+- `adb_types.go`: ADB 相关数据结构
+- `adb_parse.go`: ADB 输出解析与进度输出消费
 
 ## 许可证
 
